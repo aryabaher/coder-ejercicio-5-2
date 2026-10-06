@@ -1,0 +1,41 @@
+[OK] sin TODO
+[OK] main.py parsea
+[OK] cadena class SearchInput
+[OK] cadena class MockVectorDB
+[OK] cadena async def similarity_search(self, query: str, k: int)
+[OK] cadena return [f"Resultado para {query}"]
+[OK] cadena args_schema=SearchInput
+[OK] cadena async def search_knowledge_base(query: str, limit: int = 3)
+[OK] cadena await db.similarity_search(query, k=limit)
+[OK] cadena Nombre: search_knowledge_base
+[OK] cadena Esquema de Entrada
+[OK] cadena Esquema de Salida
+[OK] cadena 401/key
+[OK] cadena 429/cuota
+[OK] cadena red/timeout
+[OK] cadena Salida truncada
+[OK] cadena con_reintentos
+[OK] cadena tool_calls
+[OK] cadena if __name__ == "__main__":
+[OK] cadena asyncio.run(main())
+[OK] k no está clavado en 3
+[OK] k no está clavado en 4
+nombre=search_knowledge_base
+descripcion=Busca procedimientos, errores conocidos y configuración en la base de conocimientos técnica de soporte.
+args_schema=SearchInput
+entrada=['query', 'limit']
+tool_calls: [{'name': 'search_knowledge_base', 'args': {'query': 'caída del correo de la sede', 'limit': 2}}]
+rol tool: Fragmentos (k=2):
+[1] Resultado para caída del correo de la sede
+default_k=3
+Fragmentos (k=3):
+[1] Resultado para vpn
+Error de validación: limit: Input should be greater than or equal to 1
+401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key
+intentos_401=1
+Fragmentos (k=1):
+[1] Resultado para backup
+intentos_429=2
+Salida truncada: el fragmento 0 supera 20000 caracteres y no se recorta en silencio.
+intentos_truncado=1
+[OK] demo
