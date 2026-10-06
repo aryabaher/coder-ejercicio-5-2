@@ -27,7 +27,7 @@ CADENAS = [
     "429/cuota",
     "red/timeout",
     "Salida truncada",
-    "con_reintentos",
+    "Reintentá la consulta más tarde.",
     "tool_calls",
     'if __name__ == "__main__":',
     "asyncio.run(main())",
@@ -48,6 +48,29 @@ def _ok(nombre: str, condicion: bool, detalle: str = "") -> None:
         raise SystemExit(1)
 
 
+def _chequear_cuerpo(arbol: ast.Module) -> None:
+    for nodo in arbol.body:
+        if not isinstance(nodo, ast.AsyncFunctionDef):
+            continue
+        if nodo.name != "search_knowledge_base":
+            continue
+        inicio = nodo.decorator_list[0].lineno if nodo.decorator_list else nodo.lineno
+        fin = nodo.end_lineno or nodo.lineno
+        cuerpo = "\n".join(FUENTE.splitlines()[inicio - 1 : fin])
+        _ok("la herramienta está al inicio del archivo", inicio < 80)
+        for cadena in (
+            "@tool",
+            "args_schema=SearchInput",
+            "await db.similarity_search(query, k=limit)",
+            "429/cuota:",
+            "Salida truncada:",
+            "try:",
+        ):
+            _ok(f"dentro de search_knowledge_base: {cadena}", cadena in cuerpo)
+        return
+    _ok("existe search_knowledge_base", False)
+
+
 def _chequear_cadenas() -> None:
     _ok("sin TODO", "TODO" not in FUENTE)
     arbol = ast.parse(FUENTE)
@@ -56,6 +79,7 @@ def _chequear_cadenas() -> None:
         _ok(f"cadena {cadena}", cadena in FUENTE)
     _ok("k no está clavado en 3", "k=3" not in FUENTE)
     _ok("k no está clavado en 4", "k=4" not in FUENTE)
+    _chequear_cuerpo(arbol)
 
 
 def _correr_demo() -> None:

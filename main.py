@@ -1,19 +1,3 @@
-"""Tool calling: search_knowledge_base sobre una base vectorial simulada.
-
-Contrato de la herramienta
-- Nombre: search_knowledge_base
-- Descripción: busca fragmentos en la base de conocimientos técnica de soporte.
-- Esquema de Entrada: SearchInput (query: str, limit: int entre 1 y 10, default 3). Sin campos extra.
-- Esquema de Salida: str con los fragmentos, o un error controlado para el rol tool.
-
-El modelo no ejecuta código: emite tool_calls. Esta aplicación valida con
-Pydantic y recién ahí llama a similarity_search. La herramienta solo lee
-(query y limit). No acepta SQL ni un filtro armado por el modelo.
-
-Reintentos: 429/cuota y red/timeout, hasta 3 intentos (0.5s, 1s, 2s).
-401/key y salida truncada no se reintentan.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +12,91 @@ ESPERA_INICIAL_S = 0.5
 MAX_FRAGMENTO = 20000
 MAX_QUERY = 2000
 MAX_K = 10
+
+
+class SearchInput(BaseModel):
+    """Esquema de entrada de search_knowledge_base. Tipos estrictos, sin campos extra."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    query: str = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_QUERY,
+        description=(
+            "Texto a buscar: un procedimiento, un error conocido o configuración "
+            "interna. No puede estar vacío."
+        ),
+    )
+    limit: int = Field(
+        default=3,
+        ge=1,
+        le=MAX_K,
+        description=(
+            f"Cantidad máxima de fragmentos a devolver. Entero entre 1 y {MAX_K}. "
+            "Si se omite, se devuelven 3."
+        ),
+    )
+
+    @field_validator("query")
+    @classmethod
+    def query_no_vacia(cls, valor: str) -> str:
+        limpio = valor.strip()
+        if not limpio:
+            raise ValueError("query no puede estar vacía.")
+        return limpio
+
+
+@tool(args_schema=SearchInput)
+async def search_knowledge_base(query: str, limit: int = 3) -> str:
+    """Busca procedimientos, errores conocidos y configuración en la base de conocimientos técnica de soporte.
+
+    Nombre: search_knowledge_base. Esquema de Entrada: SearchInput (query, limit).
+    Esquema de Salida: fragmentos, o un error corto para el rol tool.
+
+    Args:
+        query: procedimiento, error conocido o configuración interna.
+        limit: fragmentos a devolver. Entero entre 1 y 10. Si se omite, 3.
+
+    Usala solo si la pregunta pide una tarea documentada, el significado de un
+    error de esa plataforma o la configuración de un sistema interno.
+    No la uses para cálculos, precios, clima, charla general ni para ejecutar SQL.
+    """
+
+    try:
+        datos = SearchInput(query=query, limit=limit)
+    except ValidationError as exc:
+        return _mensaje_validacion(exc)
+    query = datos.query
+    limit = datos.limit
+
+    espera = ESPERA_INICIAL_S
+    for intento in range(1, MAX_INTENTOS + 1):
+        try:
+            resultados = await db.similarity_search(query, k=limit)
+            aviso = _respuesta_truncada(resultados, limit)
+            if aviso is not None and aviso.startswith("Salida truncada:"):
+                return f"{aviso} Reducí el limit y reformulá la consulta."
+            return formatear_resultados(resultados, limit)
+        except Exception as exc:
+            mensaje = str(clasificar_error_busqueda(exc))
+            if mensaje.startswith("429/cuota:") or mensaje.startswith("red/timeout:"):
+                if intento < MAX_INTENTOS:
+                    await asyncio.sleep(espera)
+                    espera *= 2
+                    continue
+            if mensaje.startswith("429/cuota:"):
+                return f"{mensaje} Reintentá la consulta más tarde."
+            if mensaje.startswith("red/timeout:"):
+                return f"{mensaje} Reintentá la consulta."
+            if mensaje.startswith("Salida truncada:"):
+                return f"{mensaje} Reducí el limit y reformulá la consulta."
+            if mensaje.startswith("401/key:"):
+                return f"{mensaje} No reintentes: la clave fue rechazada."
+            if mensaje.startswith("Error de búsqueda:"):
+                return f"{mensaje} Reformulá la consulta."
+            return mensaje
+    return "429/cuota: reintentos agotados. Reintentá la consulta más tarde."
 
 
 class ErrorBusqueda(Exception):
@@ -56,39 +125,6 @@ class FalloSimulado(Exception):
     def __init__(self, status_code: int, detail: str) -> None:
         self.status_code = status_code
         super().__init__(detail)
-
-
-class SearchInput(BaseModel):
-    """Esquema de entrada de search_knowledge_base. Tipos estrictos, sin campos extra."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    query: str = Field(
-        ...,
-        min_length=1,
-        max_length=MAX_QUERY,
-        description=(
-            "Texto a buscar en la base de conocimientos técnica: un procedimiento, "
-            "un error conocido o un dato de configuración interna. No puede estar vacío."
-        ),
-    )
-    limit: int = Field(
-        default=3,
-        ge=1,
-        le=MAX_K,
-        description=(
-            f"Cantidad máxima de fragmentos a devolver. Entero entre 1 y {MAX_K}. "
-            "Si se omite, se devuelven 3."
-        ),
-    )
-
-    @field_validator("query")
-    @classmethod
-    def query_no_vacia(cls, valor: str) -> str:
-        limpio = valor.strip()
-        if not limpio:
-            raise ValueError("query no puede estar vacía.")
-        return limpio
 
 
 class MockVectorDB:
@@ -140,7 +176,8 @@ def clasificar_error_busqueda(exc: BaseException) -> ErrorBusqueda:
         return ErrorClave(f"401/key: clave rechazada o ausente. Detalle: {detalle}")
     if status == 429 or "rate limit" in texto or "quota" in texto:
         return ErrorCuota(
-            f"429/cuota: la API rechazó la búsqueda por cuota o rate limit. Detalle: {detalle}"
+            "429/cuota: la API rechazó la búsqueda por cuota o rate limit. "
+            f"Detalle: {detalle}"
         )
     if (
         isinstance(exc, (TimeoutError, ConnectionError))
@@ -153,97 +190,51 @@ def clasificar_error_busqueda(exc: BaseException) -> ErrorBusqueda:
     return ErrorBusqueda(f"Error de búsqueda: {detalle}")
 
 
-def validar_salida(resultados: object, k: int) -> List[str]:
-    """Rechaza una salida cortada. k es el limit pedido: no se recorta la lista."""
-
-    if k < 1:
-        raise ErrorBusqueda(f"limit/k inválido: {k}.")
-    if not isinstance(resultados, list):
-        raise ErrorSalidaTruncada(
-            "Salida truncada: similarity_search no devolvió la lista completa de fragmentos."
-        )
-    if len(resultados) > k:
-        raise ErrorSalidaTruncada(
-            f"Salida truncada: la base devolvió {len(resultados)} fragmentos "
-            f"y el limit/k pedido fue {k}. No se recorta en silencio."
-        )
-    textos: List[str] = []
-    for indice, item in enumerate(resultados):
-        if not isinstance(item, str):
-            raise ErrorSalidaTruncada(
-                f"Salida truncada: el fragmento {indice} no es texto completo."
-            )
-        if len(item) > MAX_FRAGMENTO:
-            raise ErrorSalidaTruncada(
-                f"Salida truncada: el fragmento {indice} supera {MAX_FRAGMENTO} "
-                "caracteres y no se recorta en silencio."
-            )
-        textos.append(item)
-    return textos
-
-
 def formatear_resultados(fragmentos: List[str], limit: int) -> str:
-    """Esquema de salida: texto que el modelo lee como observación (rol tool)."""
+    """Texto que el modelo lee como observación."""
 
-    lineas = [
-        f"[{indice}] {texto}" for indice, texto in enumerate(fragmentos, start=1)
-    ]
+    lineas = [f"[{indice}] {texto}" for indice, texto in enumerate(fragmentos, start=1)]
     return f"Fragmentos (k={limit}):\n" + "\n".join(lineas)
 
 
 def _mensaje_validacion(exc: ValidationError) -> str:
     err = exc.errors()[0]
     lugar = ".".join(str(parte) for parte in err["loc"]) or "args"
-    return f"Error de validación: {lugar}: {err['msg']}"
+    return (
+        f"Error de validación: {lugar}: {err['msg']} "
+        "Reformulá la consulta: query es texto y limit es un entero entre 1 y 10."
+    )
 
 
-async def con_reintentos(query: str, limit: int) -> List[str]:
-    """Llama a similarity_search con k=limit. Reintenta solo 429 y red/timeout."""
+def _respuesta_truncada(resultados: object, limit: int) -> Optional[str]:
+    """None si la salida entra. Si no, el aviso con prefijo Salida truncada."""
 
-    espera = ESPERA_INICIAL_S
-    ultimo: Optional[ErrorBusqueda] = None
-    for intento in range(1, MAX_INTENTOS + 1):
-        try:
-            resultados = await db.similarity_search(query, k=limit)
-            return validar_salida(resultados, k=limit)
-        except Exception as exc:
-            clasificado = clasificar_error_busqueda(exc)
-            transitorio = isinstance(clasificado, (ErrorCuota, ErrorRed))
-            if not transitorio or intento == MAX_INTENTOS:
-                raise clasificado from exc
-            ultimo = clasificado
-            await asyncio.sleep(espera)
-            espera *= 2
-    if ultimo is None:
-        raise ErrorBusqueda("Error de búsqueda: reintentos agotados sin detalle.")
-    raise ultimo
-
-
-@tool(args_schema=SearchInput)
-async def search_knowledge_base(query: str, limit: int = 3) -> str:
-    """Busca procedimientos, errores conocidos y configuración en la base de conocimientos técnica de soporte.
-
-    Usala solo si la pregunta pide cómo hacer una tarea documentada, qué significa
-    un error de esa plataforma o cómo está configurado un sistema interno.
-    No la uses para cálculos, precios, clima, charla general, ni para ejecutar SQL
-    o consultar un sistema que no esté en esa base.
-    """
-
-    try:
-        datos = SearchInput(query=query, limit=limit)
-        fragmentos = await con_reintentos(datos.query, datos.limit)
-    except ValidationError as exc:
-        return _mensaje_validacion(exc)
-    except ErrorBusqueda as exc:
-        return str(exc)
-    return formatear_resultados(fragmentos, datos.limit)
+    if not isinstance(resultados, list):
+        return (
+            "Salida truncada: similarity_search no devolvió la lista completa "
+            "de fragmentos."
+        )
+    if len(resultados) > limit:
+        return (
+            f"Salida truncada: la base devolvió {len(resultados)} fragmentos "
+            f"y el limit/k pedido fue {limit}. No se recorta en silencio."
+        )
+    for indice, item in enumerate(resultados):
+        if not isinstance(item, str):
+            return f"Salida truncada: el fragmento {indice} no es texto completo."
+        if len(item) > MAX_FRAGMENTO:
+            return (
+                f"Salida truncada: el fragmento {indice} supera {MAX_FRAGMENTO} "
+                "caracteres y no se recorta en silencio."
+            )
+    return None
 
 
 search_knowledge_base.handle_validation_error = _mensaje_validacion
 
 
 async def ejecutar_tool_call(nombre: str, args: dict) -> str:
-    """Paso local del ciclo: valida con Pydantic, ejecuta y devuelve la observación."""
+    """Valida con Pydantic, ejecuta la herramienta y devuelve la observación."""
 
     if nombre != search_knowledge_base.name:
         return f"Error controlado: herramienta desconocida: {nombre}"

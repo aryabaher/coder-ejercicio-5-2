@@ -53,7 +53,8 @@ async def test_401_devuelve_string_y_no_reintenta() -> None:
     db.fallos.append(FalloSimulado(401, "Unauthorized: invalid API key"))
     texto = await search_knowledge_base.ainvoke({"query": "vpn", "limit": 3})
     assert texto == (
-        "401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key"
+        "401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key "
+        "No reintentes: la clave fue rechazada."
     )
     assert len(db.llamadas) == 1
 
@@ -75,7 +76,8 @@ async def test_429_reintenta_y_luego_falla(monkeypatch: pytest.MonkeyPatch) -> N
     texto = await search_knowledge_base.ainvoke({"query": "backup", "limit": 3})
     assert texto == (
         "429/cuota: la API rechazó la búsqueda por cuota o rate limit. "
-        "Detalle: rate limit / quota exceeded"
+        "Detalle: rate limit / quota exceeded "
+        "Reintentá la consulta más tarde."
     )
     assert len(db.llamadas) == 3
     assert esperas == [0.5, 1.0]
@@ -100,7 +102,8 @@ async def test_timeout_agotado() -> None:
     texto = await search_knowledge_base.ainvoke({"query": "vpn", "limit": 2})
     assert texto == (
         "red/timeout: no se pudo hablar con la base vectorial. "
-        "Detalle: Request timed out talking to the index"
+        "Detalle: Request timed out talking to the index "
+        "Reintentá la consulta."
     )
     assert len(db.llamadas) == 3
 
@@ -117,7 +120,8 @@ async def test_salida_truncada_no_recorta_ni_reintenta() -> None:
     texto = await search_knowledge_base.ainvoke({"query": "log", "limit": 3})
     assert texto == (
         f"Salida truncada: el fragmento 0 supera {MAX_FRAGMENTO} "
-        "caracteres y no se recorta en silencio."
+        "caracteres y no se recorta en silencio. "
+        "Reducí el limit y reformulá la consulta."
     )
     assert len(db.llamadas) == 1
 
@@ -140,7 +144,7 @@ async def test_salida_no_es_lista() -> None:
 async def test_error_no_transitorio_no_reintenta() -> None:
     db.fallos.append(RuntimeError("boom"))
     texto = await search_knowledge_base.ainvoke({"query": "vpn", "limit": 3})
-    assert texto == "Error de búsqueda: boom"
+    assert texto == "Error de búsqueda: boom Reformulá la consulta."
     assert len(db.llamadas) == 1
     assert issubclass(ErrorBusqueda, Exception)
 

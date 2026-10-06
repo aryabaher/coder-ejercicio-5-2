@@ -55,9 +55,9 @@ Deberías ver `nombre=search_knowledge_base`, `args_schema=SearchInput`, `tool_c
 | `SearchInput` (`query`, `limit`) | `main.py` |
 | `MockVectorDB.similarity_search` | `main.py` |
 | `@tool(args_schema=SearchInput)` + `async def search_knowledge_base` | `main.py` |
-| `con_reintentos` (`k=limit`, backoff 429/red) | `main.py` |
+| Reintento 429/red y `Salida truncada:` dentro de `search_knowledge_base` | `main.py` |
 | `ejecutar_tool_call` (valida y ejecuta el `tool_calls`) | `main.py` |
-| Contrato nombre / descripción / esquemas | docstring de `main.py` |
+| Nombre, esquemas y `Args` de `query` y `limit` | docstring de `search_knowledge_base` |
 | Demo ejecutable | `main.py` → `if __name__ == "__main__"` |
 | Chequeo offline | `validacion.py` |
 | Tests | `tests/` |
@@ -78,7 +78,7 @@ Deberías ver `nombre=search_knowledge_base`, `args_schema=SearchInput`, `tool_c
 
 ## Contrato de la herramienta
 
-Queda en el docstring de `main.py`:
+Queda en el docstring de `search_knowledge_base`:
 
 - **Nombre:** `search_knowledge_base`.
 - **Descripción:** busca procedimientos, errores conocidos y configuración en la base de conocimientos técnica de soporte. Sirve cuando la pregunta pide cómo hacer una tarea documentada, qué significa un error de esa plataforma o cómo está configurado un sistema interno. No sirve para cálculos, precios, clima, charla general ni para ejecutar SQL.
@@ -91,7 +91,7 @@ Queda en el docstring de `main.py`:
 
 ### Validación Pydantic
 
-**Mensaje:** `Error de validación: limit: Input should be greater than or equal to 1`
+**Mensaje:** `Error de validación: limit: Input should be greater than or equal to 1 Reformulá la consulta: query es texto y limit es un entero entre 1 y 10.`
 
 Con query en blanco, `SearchInput` responde `Value error, query no puede estar vacía.` Si falta `query`: `Field required`. Si `limit` viene como texto, aunque sea `"3"`: `Input should be a valid integer`. Si `limit` es 11: `Input should be less than or equal to 10`. Si `query` supera 2000 caracteres: `String should have at most 2000 characters`. Un campo que no está en el esquema, por ejemplo `sql`: `Error de validación: sql: Extra inputs are not permitted`.
 
@@ -101,7 +101,7 @@ Con query en blanco, `SearchInput` responde `Value error, query no puede estar v
 
 ### 401 / key
 
-**Mensaje:** `401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key`
+**Mensaje:** `401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key No reintentes: la clave fue rechazada.`
 
 **Cómo reproducirlo:** encolar en `db.fallos` un `FalloSimulado(401, "Unauthorized: invalid API key")` y llamar `ainvoke`. No se reintenta: hay una sola llamada.
 
@@ -109,7 +109,7 @@ Con query en blanco, `SearchInput` responde `Value error, query no puede estar v
 
 ### 429 / cuota
 
-**Mensaje:** `429/cuota: la API rechazó la búsqueda por cuota o rate limit. Detalle: rate limit / quota exceeded`
+**Mensaje:** `429/cuota: la API rechazó la búsqueda por cuota o rate limit. Detalle: rate limit / quota exceeded Reintentá la consulta más tarde.`
 
 **Cómo reproducirlo:** encolar tres `FalloSimulado(429, "rate limit / quota exceeded")`. Hay 3 llamadas; entre la primera y la segunda se espera 0.5s y entre la segunda y la tercera 1s (en tests la espera es 0, y un test anota `[0.5, 1.0]`). Si el segundo intento responde bien, vuelve `Resultado para ...`.
 
@@ -117,7 +117,7 @@ Con query en blanco, `SearchInput` responde `Value error, query no puede estar v
 
 ### red / timeout
 
-**Mensaje:** `red/timeout: no se pudo hablar con la base vectorial. Detalle: Request timed out talking to the index`
+**Mensaje:** `red/timeout: no se pudo hablar con la base vectorial. Detalle: Request timed out talking to the index Reintentá la consulta.`
 
 **Cómo reproducirlo:** encolar tres `TimeoutError("Request timed out talking to the index")`. Se reintenta igual que el 429. Un `ConnectionError` en el primer intento y éxito en el segundo devuelve el fragmento.
 
@@ -125,7 +125,7 @@ Con query en blanco, `SearchInput` responde `Value error, query no puede estar v
 
 ### Salida truncada
 
-**Mensaje:** `Salida truncada: el fragmento 0 supera 20000 caracteres y no se recorta en silencio.`
+**Mensaje:** `Salida truncada: el fragmento 0 supera 20000 caracteres y no se recorta en silencio. Reducí el limit y reformulá la consulta.`
 
 Si la base devuelve más fragmentos que el `k` pedido: `Salida truncada: la base devolvió 3 fragmentos y el limit/k pedido fue 2. No se recorta en silencio.` Si no devuelve una lista: `Salida truncada: similarity_search no devolvió la lista completa de fragmentos.` Un `finish_reason=length` se clasifica como `Salida truncada: la base cortó la respuesta. Detalle: finish_reason=length`.
 
@@ -135,7 +135,7 @@ Si la base devuelve más fragmentos que el `k` pedido: `Salida truncada: la base
 
 ### Error no transitorio
 
-**Mensaje:** `Error de búsqueda: boom`
+**Mensaje:** `Error de búsqueda: boom Reformulá la consulta.`
 
 **Cómo reproducirlo:** encolar `RuntimeError("boom")`. Una sola llamada.
 
@@ -157,9 +157,9 @@ Si la base devuelve más fragmentos que el `k` pedido: `Salida truncada: la base
 - [x] `await db.similarity_search(query, k=limit)` — el `limit` de la llamada es el `k`
 - [x] Default `limit=3` solo cuando la llamada no lo manda
 - [x] Error de la herramienta devuelto como string (401/key, 429/cuota, red/timeout, salida truncada, validación)
-- [x] `con_reintentos` usado dentro de `search_knowledge_base` (429 y red sí; 401 y truncado no)
+- [x] El reintento de 429/red y el aviso `Salida truncada:` están dentro de `search_knowledge_base`
 - [x] `ejecutar_tool_call` valida con Pydantic antes de tocar la base
-- [x] Contrato nombre / descripción / esquemas en el docstring de `main.py`
+- [x] Docstring de `search_knowledge_base` con nombre, esquemas y argumentos `query` y `limit`
 - [x] `if __name__ == "__main__"` ejecutable
 - [x] pytest + mocks (sin API real)
 - [x] README con una subsección por familia de error

@@ -14,12 +14,19 @@
 [OK] cadena 429/cuota
 [OK] cadena red/timeout
 [OK] cadena Salida truncada
-[OK] cadena con_reintentos
+[OK] cadena Reintentá la consulta más tarde.
 [OK] cadena tool_calls
 [OK] cadena if __name__ == "__main__":
 [OK] cadena asyncio.run(main())
 [OK] k no está clavado en 3
 [OK] k no está clavado en 4
+[OK] la herramienta está al inicio del archivo
+[OK] dentro de search_knowledge_base: @tool
+[OK] dentro de search_knowledge_base: args_schema=SearchInput
+[OK] dentro de search_knowledge_base: await db.similarity_search(query, k=limit)
+[OK] dentro de search_knowledge_base: 429/cuota:
+[OK] dentro de search_knowledge_base: Salida truncada:
+[OK] dentro de search_knowledge_base: try:
 nombre=search_knowledge_base
 descripcion=Busca procedimientos, errores conocidos y configuración en la base de conocimientos técnica de soporte.
 args_schema=SearchInput
@@ -30,12 +37,12 @@ rol tool: Fragmentos (k=2):
 default_k=3
 Fragmentos (k=3):
 [1] Resultado para vpn
-Error de validación: limit: Input should be greater than or equal to 1
-401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key
+Error de validación: limit: Input should be greater than or equal to 1 Reformulá la consulta: query es texto y limit es un entero entre 1 y 10.
+401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key No reintentes: la clave fue rechazada.
 intentos_401=1
 Fragmentos (k=1):
 [1] Resultado para backup
 intentos_429=2
-Salida truncada: el fragmento 0 supera 20000 caracteres y no se recorta en silencio.
+Salida truncada: el fragmento 0 supera 20000 caracteres y no se recorta en silencio. Reducí el limit y reformulá la consulta.
 intentos_truncado=1
 [OK] demo

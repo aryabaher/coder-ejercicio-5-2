@@ -8,11 +8,11 @@ rol tool: Fragmentos (k=2):
 default_k=3
 Fragmentos (k=3):
 [1] Resultado para vpn
-Error de validación: limit: Input should be greater than or equal to 1
-401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key
+Error de validación: limit: Input should be greater than or equal to 1 Reformulá la consulta: query es texto y limit es un entero entre 1 y 10.
+401/key: clave rechazada o ausente. Detalle: Unauthorized: invalid API key No reintentes: la clave fue rechazada.
 intentos_401=1
 Fragmentos (k=1):
 [1] Resultado para backup
 intentos_429=2
-Salida truncada: el fragmento 0 supera 20000 caracteres y no se recorta en silencio.
+Salida truncada: el fragmento 0 supera 20000 caracteres y no se recorta en silencio. Reducí el limit y reformulá la consulta.
 intentos_truncado=1
